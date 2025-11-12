@@ -1,91 +1,76 @@
-# cloudbuild.yaml
+# cloudbuild.yaml - corrected, 5 step flow: build -> push -> deploy -> notify -> tag:latest
 options:
   substitutionOption: ALLOW_LOOSE
 
-# Secrets from Secret Manager -> env vars in build steps
 availableSecrets:
   secretManager:
     - versionName: "projects/${PROJECT_ID}/secrets/LEARN_VALID_API_KEY/versions/1"
-      env: ["LEARN_VALID_API_KEY"]
+      env: ["VALID_API_KEY"]
     - versionName: "projects/${PROJECT_ID}/secrets/LEARN_EDIT_CHAT_WEBHOOK/versions/1"
-      env: ["LEARN_EDIT_CHAT_WEBHOOK"]
+      env: ["CHAT_WEBHOOK"]
 
-# Steps
 steps:
-  # 1) Build Docker image
-  - name: "gcr.io/cloud-builders/docker"
-    id: "build-image"
+  - id: "build-image"
+    name: "gcr.io/cloud-builders/docker"
     args: ["build", "-t", "${_IMAGE}", "."]
 
-  # 2) Push to Artifact Registry
-  - name: "gcr.io/cloud-builders/docker"
-    id: "push-image"
+  - id: "push-image"
+    name: "gcr.io/cloud-builders/docker"
     args: ["push", "${_IMAGE}"]
 
-  # 3) Deploy to Cloud Run
-  - name: "gcr.io/google.com/cloudsdktool/cloud-sdk:slim"
-    id: "deploy-cloudrun"
+  - id: "deploy-cloudrun"
+    name: "gcr.io/google.com/cloudsdktool/cloud-sdk:slim"
     entrypoint: "bash"
     env:
       - "CLOUDSDK_CORE_PROJECT=${PROJECT_ID}"
-      - "VALID_API_KEY=${LEARN_VALID_API_KEY}"
+      - "VALID_API_KEY=${VALID_API_KEY}"
     args:
       - "-c"
       - |
         set -euo pipefail
-        echo "Deploying ${_SERVICE} from image ${_IMAGE} to ${_REGION}"
+        echo "Deploying ${_SERVICE} to ${_REGION} from image ${_IMAGE}"
         gcloud run deploy "${_SERVICE}" \
           --image="${_IMAGE}" \
           --region="${_REGION}" \
           --platform=managed \
           --service-account="${_SERVICE_ACCOUNT}" \
-          --set-env-vars "VALID_API_KEY=${LEARN_VALID_API_KEY},DEFAULT_BQ_PROJECT=${_DEFAULT_BQ_PROJECT},DEFAULT_COLLECTION=${_DEFAULT_COLLECTION},DEFAULT_LOCATION=${_DEFAULT_LOCATION}" \
+          --set-env-vars "VALID_API_KEY=${VALID_API_KEY},DEFAULT_BQ_PROJECT=${_DEFAULT_BQ_PROJECT},DEFAULT_COLLECTION=${_DEFAULT_COLLECTION},DEFAULT_LOCATION=${_DEFAULT_LOCATION}" \
+          --quiet \
           --no-allow-unauthenticated
 
-  # 4) Notify Google Chat (use CHAT_WEBHOOK secret)
-  - name: "gcr.io/google.com/cloudsdktool/cloud-sdk:slim"
-    id: "notify-chat"
+  - id: "notify-chat"
+    name: "gcr.io/google.com/cloudsdktool/cloud-sdk:slim"
     entrypoint: "bash"
     env:
-      - "CHAT_WEBHOOK=${LEARN_EDIT_CHAT_WEBHOOK}"
+      - "CHAT_WEBHOOK=${CHAT_WEBHOOK}"
     args:
       - "-c"
       - |
         set -e
-        # Prepare Chat message JSON - adjust text as needed
-        read -r -d '' PAYLOAD <<'JSON'
-        {
-          "text": "✅ Deploy complete: ${_SERVICE}\nImage: ${_IMAGE}\nRegion: ${_REGION}\nCommit: ${SHORT_SHA}"
-        }
-        JSON
-        # send to webhook
+        PAYLOAD=$( jq -nc --arg svc "${_SERVICE}" --arg img "${_IMAGE}" --arg sha "${SHORT_SHA}" --arg region "${_REGION}" '{text:("✅ Deploy complete: "+$svc+"\nImage: "+$img+"\nCommit: "+$sha+"\nRegion: "+$region)}' )
         curl -sS -X POST "${CHAT_WEBHOOK}" -H "Content-Type: application/json" -d "${PAYLOAD}" || echo "Chat notify failed"
 
-  # 5) Tag image as 'latest' and push (register built image)
-  - name: "gcr.io/cloud-builders/docker"
-    id: "tag-and-push-latest"
+  - id: "tag-and-push-latest"
+    name: "gcr.io/cloud-builders/docker"
     args:
       - "bash"
       - "-c"
       - |
         set -e
-        echo "Tagging image ${_IMAGE} -> ${_IMAGE_LATEST}"
+        echo "Tagging ${_IMAGE} -> ${_IMAGE_LATEST}"
         docker tag "${_IMAGE}" "${_IMAGE_LATEST}"
         docker push "${_IMAGE_LATEST}"
 
-# substitutions (override in triggers or gcloud builds submit)
 substitutions:
   _REGION: "asia-northeast1"
-  _REPOSITORY: "my-docker-repo"               # Artifact Registry repo name
-  _IMAGE_NAME: "faq-sync"                     # image name
-  _SERVICE: "faq-sync"                        # Cloud Run service name
+  _REPOSITORY: "my-docker-repo"
+  _IMAGE_NAME: "faq-sync"
+  _SERVICE: "faq-sync"
   _SERVICE_ACCOUNT: "faq-sync-sa@${PROJECT_ID}.iam.gserviceaccount.com"
   _DEFAULT_BQ_PROJECT: "demo002-458407"
   _DEFAULT_COLLECTION: "demo-faqs"
   _DEFAULT_LOCATION: "asia-northeast1"
-  # computed image names (can override)
   _IMAGE: "${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/${_IMAGE_NAME}:${SHORT_SHA}"
   _IMAGE_LATEST: "${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/${_IMAGE_NAME}:latest"
 
-# timeout (optional)
 timeout: "1200s"
