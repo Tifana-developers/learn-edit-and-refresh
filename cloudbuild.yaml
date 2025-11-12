@@ -1,0 +1,70 @@
+# cloudbuild.yaml（Secret Manager を使わないバージョン）
+options:
+  substitutionOption: ALLOW_LOOSE
+
+steps:
+  - name: "gcr.io/cloud-builders/docker"
+    id: "build-image"
+    args: ["build", "-t", "${_IMAGE}", "."]
+
+  - name: "gcr.io/cloud-builders/docker"
+    id: "push-image"
+    args: ["push", "${_IMAGE}"]
+
+  - name: "gcr.io/google.com/cloudsdktool/cloud-sdk:slim"
+    id: "deploy-cloudrun"
+    entrypoint: "bash"
+    env:
+      - "CLOUDSDK_CORE_PROJECT=${PROJECT_ID}"
+    args:
+      - "-c"
+      - |
+        set -euo pipefail
+        echo "Deploying ${_SERVICE} from image ${_IMAGE} to ${_REGION}"
+        gcloud run deploy "${_SERVICE}" \
+          --image="${_IMAGE}" \
+          --region="${_REGION}" \
+          --platform=managed \
+          --service-account="${_SERVICE_ACCOUNT}" \
+          --set-env-vars "VALID_API_KEY=${_VALID_API_KEY},DEFAULT_BQ_PROJECT=${_DEFAULT_BQ_PROJECT},DEFAULT_COLLECTION=${_DEFAULT_COLLECTION},DEFAULT_LOCATION=${_DEFAULT_LOCATION}" \
+          --no-allow-unauthenticated
+
+  - name: "gcr.io/google.com/cloudsdktool/cloud-sdk:slim"
+    id: "notify-chat"
+    entrypoint: "bash"
+    env:
+      - "CHAT_WEBHOOK=${_CHAT_WEBHOOK}"
+    args:
+      - "-c"
+      - |
+        set -e
+        read -r -d '' PAYLOAD <<'JSON'
+        {
+          "text": "✅ Deploy complete: ${_SERVICE}\nImage: ${_IMAGE}\nRegion: ${_REGION}\nCommit: ${SHORT_SHA}"
+        }
+        JSON
+        # 注意: CHAT_WEBHOOK は substitutions で注入されます
+        curl -sS -X POST "${_CHAT_WEBHOOK}" -H "Content-Type: application/json" -d "${PAYLOAD}" || echo "Chat notify failed"
+
+  - name: "gcr.io/cloud-builders/docker"
+    id: "tag-and-push-latest"
+    args:
+      - "bash"
+      - "-c"
+      - |
+        set -e
+        docker tag "${_IMAGE}" "${_IMAGE_LATEST}"
+        docker push "${_IMAGE_LATEST}"
+
+substitutions:
+  _REGION: "asia-northeast1"
+  _REPOSITORY: "my-docker-repo"
+  _IMAGE_NAME: "faq-sync"
+  _SERVICE: "faq-sync"
+  _SERVICE_ACCOUNT: "faq-sync-sa@${PROJECT_ID}.iam.gserviceaccount.com"
+  _DEFAULT_BQ_PROJECT: "demo002-458407"
+  _DEFAULT_COLLECTION: "demo-faqs"
+  _DEFAULT_LOCATION: "asia-northeast1"
+  _IMAGE: "${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/${_IMAGE_NAME}:${SHORT_SHA}"
+  _IMAGE_LATEST: "${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/${_IMAGE_NAME}:latest"
+timeout: "1200s"
