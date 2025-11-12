@@ -5,10 +5,10 @@ options:
 # Secrets from Secret Manager -> env vars in build steps
 availableSecrets:
   secretManager:
-    - versionName: "projects/${PROJECT_ID}/secrets/VALID_API_KEY/versions/1"
-      env: ["VALID_API_KEY"]
-    - versionName: "projects/${PROJECT_ID}/secrets/CHAT_WEBHOOK/versions/1"
-      env: ["CHAT_WEBHOOK"]
+    - versionName: "projects/${PROJECT_ID}/secrets/LEARN_VALID_API_KEY/versions/1"
+      env: ["LEARN_VALID_API_KEY"]
+    - versionName: "projects/${PROJECT_ID}/secrets/LEARN_EDIT_CHAT_WEBHOOK/versions/1"
+      env: ["LEARN_EDIT_CHAT_WEBHOOK"]
 
 # Steps
 steps:
@@ -28,7 +28,7 @@ steps:
     entrypoint: "bash"
     env:
       - "CLOUDSDK_CORE_PROJECT=${PROJECT_ID}"
-      - "VALID_API_KEY=${VALID_API_KEY}"
+      - "VALID_API_KEY=${LEARN_VALID_API_KEY}"
     args:
       - "-c"
       - |
@@ -39,7 +39,7 @@ steps:
           --region="${_REGION}" \
           --platform=managed \
           --service-account="${_SERVICE_ACCOUNT}" \
-          --set-env-vars "VALID_API_KEY=${VALID_API_KEY},DEFAULT_BQ_PROJECT=${_DEFAULT_BQ_PROJECT},DEFAULT_COLLECTION=${_DEFAULT_COLLECTION},DEFAULT_LOCATION=${_DEFAULT_LOCATION}" \
+          --set-env-vars "VALID_API_KEY=${LEARN_VALID_API_KEY},DEFAULT_BQ_PROJECT=${_DEFAULT_BQ_PROJECT},DEFAULT_COLLECTION=${_DEFAULT_COLLECTION},DEFAULT_LOCATION=${_DEFAULT_LOCATION}" \
           --no-allow-unauthenticated
 
   # 4) Notify Google Chat (use CHAT_WEBHOOK secret)
@@ -47,7 +47,7 @@ steps:
     id: "notify-chat"
     entrypoint: "bash"
     env:
-      - "CHAT_WEBHOOK=${CHAT_WEBHOOK}"
+      - "CHAT_WEBHOOK=${LEARN_EDIT_CHAT_WEBHOOK}"
     args:
       - "-c"
       - |
